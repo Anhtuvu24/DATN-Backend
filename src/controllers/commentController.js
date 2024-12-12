@@ -17,9 +17,18 @@ exports.addComment = async (req, res) => {
         // Tạo comment
         const newComment = await Comment.create({ id_user, id_task, text });
 
+        const commentWithUser = await Comment.findByPk(newComment.id, {
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                },
+            ],
+        });
+
         res.status(201).json({
             success: true,
-            data: newComment,
+            commentWithUser,
         });
     } catch (error) {
         console.error(error);
@@ -50,11 +59,21 @@ exports.updateComment = async (req, res) => {
         }
 
         // Cập nhật nội dung
-        const updatedComment = await comment.update({ text });
+        await comment.update({ text });
+
+        // Lấy lại comment với thông tin user
+        const updatedCommentWithUser = await Comment.findByPk(comment.id, {
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                },
+            ],
+        });
 
         res.status(200).json({
             success: true,
-            data: updatedComment,
+            updatedCommentWithUser,
         });
     } catch (error) {
         console.error(error);
@@ -63,9 +82,9 @@ exports.updateComment = async (req, res) => {
             message: 'Failed to update comment',
         });
     }
-}
+};
 
-exports.deleteComment = async (req, res) => {
+exports.deleteComments = async (req, res) => {
     try {
         let { ids } = req.body; // Chấp nhận xóa nhiều comment cùng lúc
 
@@ -114,6 +133,37 @@ exports.deleteComment = async (req, res) => {
         });
     }
 }
+
+exports.deleteComment = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Tìm comment
+        const comment = await Comment.findByPk(id);
+        if (!comment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Comment not found',
+            });
+        }
+
+        // Xóa comment
+        await comment.destroy();
+
+        // Trả về id của comment đã xóa
+        res.status(200).json({
+            success: true,
+            message: 'Comment deleted successfully',
+            data: { id },
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete comment',
+        });
+    }
+};
 
 exports.getListCommentByTaskId = async (req, res) => {
     try {

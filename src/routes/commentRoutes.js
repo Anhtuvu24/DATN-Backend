@@ -10,7 +10,9 @@ router.post('/add', upload.none(), CommentController.addComment);
 router.put('/update/:id', upload.none(), CommentController.updateComment);
 
 // Xóa 1 hoặc nhiều project_type
-router.delete('/delete', upload.none(), CommentController.deleteComment);
+router.delete('/delete', upload.none(), CommentController.deleteComments);
+
+router.delete('/delete/:id', upload.none(), CommentController.deleteComment);
 
 // Lấy danh sách project_type
 router.get('/list/:id_task', upload.none(), CommentController.getListCommentByTaskId);

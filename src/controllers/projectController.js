@@ -1,13 +1,19 @@
 const Project = require('../models/project');
 const ProjectType = require('../models/ProjectType');
 const User = require('../models/User');
+const Sprint = require('../models/Sprint');
 const path = require('path');
+const _ = require('lodash');
+const { Op, Sequelize } = require("sequelize");
+
+const { uploadFileToFirebase } = require('../services/firebaseUploader');
 
 // Thêm project
 exports.createProject = async (req, res) => {
     try {
         const { id_type, id_lead, name, key, is_favorite } = req.body;
-
+        const file = req.file; // Lấy file từ form-data
+        // Kiểm tra xem project với key đã tồn tại chưa
         const existingProject = await Project.findOne({ where: { key } });
         if (existingProject) {
             return res.status(400).json({
@@ -15,20 +21,32 @@ exports.createProject = async (req, res) => {
             });
         }
 
-        const projectTypeExists = await ProjectType.findByPk(id_type);
-        if (!projectTypeExists) {
+        // Kiểm tra id_type có tồn tại trong bảng project_type không
+        const projectType = await ProjectType.findByPk(id_type, {
+            attributes: ['id', 'name'], // Chỉ lấy trường name cần thiết
+        });
+        if (!projectType) {
             return res.status(400).json({ message: 'Invalid id_type, not found in project_type table' });
         }
 
-        const userExists = await User.findByPk(id_lead);
-        if (!userExists) {
+        // Kiểm tra id_lead có tồn tại trong bảng user không
+        const leadUser = await User.findByPk(id_lead, {
+            attributes: ['id', 'user_name', 'avatar'], // Chỉ lấy trường user_name cần thiết
+        });
+        if (!leadUser) {
             return res.status(400).json({ message: 'Invalid id_lead, not found in user table' });
         }
 
-        const defaultIcon = path.join(__dirname, '../assets/images/project_icon_df');
-        const iconPath = req.file ? `/uploads/${req.file.filename}` : null;
-        const projectIcon = iconPath || defaultIcon;
+        // Đường dẫn icon mặc định
+        let projectIcon = null;
 
+        if (file) {
+            // Tải file lên Firebase Storage nếu có file
+            const destination = `projects/icons/${Date.now()}-${file.originalname}`;
+            projectIcon = await uploadFileToFirebase(file.path, destination, file.mimetype);
+        }
+
+        // Tạo project mới
         const newProject = await Project.create({
             id_type,
             id_lead,
@@ -40,7 +58,16 @@ exports.createProject = async (req, res) => {
 
         res.status(201).json({
             message: 'Project created successfully',
-            project: newProject,
+            project: {
+                id: newProject.id,
+                name: newProject.name,
+                key: newProject.key,
+                icon: newProject.icon,
+                is_favorite: newProject.is_favorite,
+                user_name: leadUser.user_name, // Trả về user_name của lead
+                user_avatar: leadUser.avatar, // Trả về user_name của lead
+                project_type_name: projectType.name, // Trả về name của projectType
+            },
         });
     } catch (error) {
         console.error(error);
@@ -48,11 +75,13 @@ exports.createProject = async (req, res) => {
     }
 };
 
+
 // Sửa project
 exports.updateProject = async (req, res) => {
     try {
         const projectId = req.params.id;
-        const { id_type, id_lead, name, key, icon, is_favorite } = req.body;
+        const { id_type, id_lead, name, key, is_favorite } = req.body;
+        const file = req.file;
 
         // Tìm project theo ID
         const project = await Project.findByPk(projectId);
@@ -60,36 +89,57 @@ exports.updateProject = async (req, res) => {
             return res.status(404).json({ message: 'Project not found' });
         }
 
-        // Kiểm tra id_type có tồn tại (nếu được cung cấp)
+        // Kiểm tra id_type
+        let projectType = null;
         if (id_type) {
-            const projectTypeExists = await ProjectType.findByPk(id_type);
-            if (!projectTypeExists) {
+            projectType = await ProjectType.findByPk(id_type, { attributes: ['id', 'name'] });
+            if (!projectType) {
                 return res.status(400).json({ message: 'Invalid id_type, not found in project_type table' });
             }
+        } else if (project.id_type) {
+            projectType = await ProjectType.findByPk(project.id_type, { attributes: ['id', 'name'] });
         }
 
-        // Kiểm tra id_lead có tồn tại (nếu được cung cấp)
+        // Kiểm tra id_lead
+        let leadUser = null;
         if (id_lead) {
-            const userExists = await User.findByPk(id_lead);
-            if (!userExists) {
+            leadUser = await User.findByPk(id_lead, { attributes: ['id', 'user_name'] });
+            if (!leadUser) {
                 return res.status(400).json({ message: 'Invalid id_lead, not found in user table' });
             }
+        } else if (project.id_lead) {
+            leadUser = await User.findByPk(project.id_lead, { attributes: ['id', 'user_name'] });
         }
 
-        const iconPath = req.file ? `/uploads/${req.file.filename}` : null;
-        // Cập nhật project
+        // Cập nhật icon nếu có file mới
+        let updatedIcon = project.icon;
+        if (file) {
+            const destination = `projects/icons/${Date.now()}-${file.originalname}`;
+            updatedIcon = await uploadFileToFirebase(file.path, destination, file.mimetype);
+        }
+
+        // Cập nhật thông tin project
         await project.update({
             id_type: id_type || project.id_type,
             id_lead: id_lead || project.id_lead,
             name: name || project.name,
             key: key || project.key,
-            icon: iconPath || project.icon,
+            icon: updatedIcon,
             is_favorite: is_favorite !== undefined ? is_favorite : project.is_favorite,
         });
 
+        // Trả về project với cấu trúc yêu cầu
         res.status(200).json({
             message: 'Project updated successfully',
-            project,
+            project: {
+                id: project.id,
+                name: project.name,
+                key: project.key,
+                icon: project.icon,
+                is_favorite: project.is_favorite,
+                user_name: leadUser ? leadUser.user_name : null,
+                project_type_name: projectType ? projectType.name : null,
+            },
         });
     } catch (error) {
         console.error(error);
@@ -142,14 +192,65 @@ exports.deleteProject = async (req, res) => {
 // Lấy danh sách
 exports.getProjects = async (req, res) => {
     try {
-        const projects = await Project.findAll({
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        const search = req.query.search || '';
+
+        const searchCondition = search
+            ? {
+                [Op.or]: [
+                    Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('Project.name')), {
+                        [Op.like]: `%${search.toLowerCase()}%`,
+                    }),
+                    Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('Project.key')), {
+                        [Op.like]: `%${search.toLowerCase()}%`,
+                    }),
+                    Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('type.name')), {
+                        [Op.like]: `%${search.toLowerCase()}%`,
+                    }),
+                    Sequelize.where(Sequelize.fn('LOWER', Sequelize.col('lead.user_name')), {
+                        [Op.like]: `%${search.toLowerCase()}%`,
+                    }),
+                ],
+            }
+            : {};
+
+        const { rows: projects, count: totalProjects } = await Project.findAndCountAll({
+            where: searchCondition,
             include: [
-                { model: ProjectType, as: 'type', attributes: ['id', 'name'] },
-                { model: User, as: 'lead', attributes: ['id', 'user_name', 'gmail'] },
+                { model: ProjectType, as: 'type', attributes: ['name'] },
+                { model: User, as: 'lead', attributes: ['user_name', 'avatar'] },
             ],
+            limit,
+            offset,
         });
 
-        res.status(200).json({ data: projects });
+        const totalPages = Math.ceil(totalProjects / limit);
+
+        const formattedProjects = projects.map((project) => {
+            const projectData = project.toJSON();
+            return {
+                id: projectData.id,
+                name: projectData.name,
+                key: projectData.key,
+                icon: projectData.icon,
+                is_favorite: projectData.is_favorite,
+                user_name: projectData.lead?.user_name || null, // Lấy user_name của lead
+                user_avatar: projectData.lead?.avatar,
+                project_type_name: projectData.type?.name || null, // Lấy name của project type
+            };
+        });
+
+        res.status(200).json({
+            data: formattedProjects,
+            pagination: {
+                total: totalProjects,
+                page,
+                limit,
+                totalPages,
+            },
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Failed to fetch projects', error: error.message });
@@ -161,11 +262,11 @@ exports.getProjectById = async (req, res) => {
     try {
         const projectId = req.params.id;
 
-        // Tìm project theo ID
+        // Lấy thông tin project
         const project = await Project.findByPk(projectId, {
             include: [
-                { model: ProjectType, as: 'type', attributes: ['id', 'name'] },
-                { model: User, as: 'lead', attributes: ['id', 'user_name', 'gmail'] },
+                { model: ProjectType, as: 'type', attributes: ['name'] },
+                { model: User, as: 'lead', attributes: ['user_name'] },
             ],
         });
 
@@ -173,7 +274,23 @@ exports.getProjectById = async (req, res) => {
             return res.status(404).json({ message: 'Project not found' });
         }
 
-        res.status(200).json({ project });
+        // Lấy các sprint đang active của project
+        const activeSprints = await Sprint.findAll({
+            where: { id_project: projectId, is_close: false },
+        });
+
+        res.status(200).json({
+            data: {
+                id: project.id,
+                name: project.name,
+                key: project.key,
+                icon: project.icon,
+                is_favorite: project.is_favorite,
+                user_name: project.lead?.user_name || null,
+                project_type_name: project.type?.name || null,
+                active_sprints: activeSprints,
+            },
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Failed to fetch project', error: error.message });

@@ -104,12 +104,37 @@ exports.deleteProjectTypes = async (req, res) => {
 // Lấy danh sách project_type
 exports.getProjectTypes = async (req, res) => {
     try {
-        const projectTypes = await ProjectType.findAll({
+        // Lấy page và limit từ query params, giá trị mặc định nếu không cung cấp
+        const page = parseInt(req.query.page, 10) || 1; // Trang hiện tại (mặc định là 1)
+        const limit = parseInt(req.query.limit, 10) || 10; // Số bản ghi mỗi trang (mặc định là 10)
+
+        if (page < 1 || limit < 1) {
+            return res.status(400).json({ message: 'Page and limit must be positive integers' });
+        }
+
+        // Tính toán offset
+        const offset = (page - 1) * limit;
+
+        // Lấy dữ liệu với phân trang
+        const { rows: projectTypes, count: totalItems } = await ProjectType.findAndCountAll({
             attributes: ['id', 'name', 'created_at', 'updated_at'], // Chỉ lấy các cột cần thiết
             order: [['created_at', 'DESC']], // Sắp xếp giảm dần theo ngày tạo
+            limit,
+            offset,
         });
 
-        res.status(200).json(projectTypes);
+        // Tính tổng số trang
+        const totalPages = Math.ceil(totalItems / limit);
+
+        res.status(200).json({
+            pagination: {
+                page,
+                perPage: limit,
+                totalItems,
+                totalPages,
+            },
+            data: projectTypes,
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'An error occurred', error: error.message });

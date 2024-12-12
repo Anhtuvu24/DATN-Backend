@@ -9,6 +9,8 @@ const { authenticateToken } = require('../middlewares/auth');
 const router = express.Router();
 
 
+// Get me
+router.get('/me', authController.getMe);
 // Add user
 router.post('/add-user', upload.none(), authController.register);
 // Login
@@ -16,7 +18,7 @@ router.post('/login', upload.none(), authController.login);
 // Refresh token
 router.post('/refresh-token', upload.none(), authController.refreshToken);
 // Get profile
-router.get('/profile', upload.none(), authenticateToken, authController.getUserProfile);
+router.get('/profile/:id', upload.none(), authController.getUserProfile);
 // Sửa thông tin người dùng
 router.put('/update-user/:id', upload.single('avatar'), userController.updateUser);
 // Xóa người dùng
@@ -26,6 +28,9 @@ router.post('/upload-avatar', upload.single('avatar'), userController.uploadAvat
 
 // lấy avatar
 router.get('/get-avatar/:id', userController.getAvatar);
+
+// Lấy danh sách user
+router.get('/get-users', userController.getListUser);
 
 
 module.exports = router;

@@ -1,7 +1,7 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database'); // Đảm bảo rằng bạn đã cấu hình kết nối Sequelize
 
-const ProjectType = sequelize.define('ProjectType', {
+const ProjectTypes = sequelize.define('ProjectTypes', {
     id: {
         type: DataTypes.UUID,
         defaultValue: DataTypes.UUIDV4,
@@ -26,4 +26,4 @@ const ProjectType = sequelize.define('ProjectType', {
     updatedAt: 'updated_at',
 });
 
-module.exports = ProjectType;
+module.exports = ProjectTypes;

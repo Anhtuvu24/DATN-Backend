@@ -1,7 +1,9 @@
 const express = require('express');
+const cors = require('cors');
 const bodyParser = require('body-parser');
 const { connectDB, sequelize } = require('./src/config/database');
 const defineAssociations = require('./src/models/associations');
+const timezoneMiddleware = require('./src/middlewares/timezone');
 require('./src/config/firebase')
 
 // Routes
@@ -13,11 +15,21 @@ const sprintRoutes = require('./src/routes/sprintRoutes');
 const taskRoutes = require('./src/routes/taskRoutes');
 const commentRoutes = require('./src/routes/commentRoutes');
 const actionRoutes = require('./src/routes/actionRoutes');
+const fileRoutes = require('./src/routes/fileRoutes');
 
 require('dotenv').config();
 
 const app = express();
 app.use(bodyParser.json());
+app.use(timezoneMiddleware);
+
+app.use(cors({
+    origin: 'http://localhost:5173', // Địa chỉ của ứng dụng React
+    methods: 'GET,POST,PUT,DELETE',
+    credentials: true
+}));
+
+defineAssociations();
 
 sequelize.sync({ alter: true })
     .then(() => {
@@ -35,9 +47,7 @@ app.use('/api/sprint', sprintRoutes);
 app.use('/api/task', taskRoutes);
 app.use('/api/comment', commentRoutes);
 app.use('/api/action', actionRoutes);
-
-defineAssociations();
-
+app.use('/api/file', fileRoutes);
 
 const PORT = process.env.PORT || 3001;
 

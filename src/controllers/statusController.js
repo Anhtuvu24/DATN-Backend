@@ -110,10 +110,12 @@ exports.getStatuses = async (req, res) => {
     try {
         const statuses = await StatusType.findAll({
             attributes: ['id', 'name', 'is_active', 'created_at', 'updated_at'],
-            order: [['created_at', 'DESC']],
+            order: [['created_at', 'ASC']],
         });
 
-        res.status(200).json(statuses);
+        res.status(200).json({
+            data: statuses
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'An error occurred', error: error.message });

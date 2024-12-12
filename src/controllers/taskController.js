@@ -1,11 +1,17 @@
 const Task = require('../models/Task')
 const Sprint = require('../models/Sprint')
 const Project = require('../models/Project')
+const Status = require('../models/Status')
+const File = require('../models/file')
+const User = require('../models/User')
+const Comment = require('../models/Comment')
+const { uploadFileToFirebase } = require('../services/firebaseUploader');
+const { sequelize } = require('../config/database');
 
 // Tạo task
 exports.addTask = async (req, res) => {
     try {
-        const { id_status, id_assignee, id_reporter, id_sprint, name, description } = req.body;
+        const { id_status, id_assignee, id_reporter, id_sprint, name, priority, description, expired_at } = req.body;
 
         if (!id_sprint) {
             return res.status(400).json({ success: false, message: 'id_sprint is required' });
@@ -17,7 +23,7 @@ exports.addTask = async (req, res) => {
             include: [
                 {
                     model: Project,
-                    as: 'project', // Alias đặt trong quan hệ giữa Sprint và Project
+                    as: 'project',
                 },
             ],
         });
@@ -26,15 +32,43 @@ exports.addTask = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Sprint not found' });
         }
 
-        const projectKey = sprint.project.key; // Lấy `key` của project
+        const projectKey = sprint.project.key;
 
-        // Đếm số lượng task hiện có trong sprint
-        const taskCount = await Task.count({
-            where: { id_sprint },
+        // Lấy ID của status có name là 'TO DO'
+        const status = await Status.findOne({
+            where: { id: id_status },
         });
 
-        // Sinh no_task
-        const no_task = `${projectKey}-${taskCount + 1}`;
+        if (!status) {
+            return res.status(404).json({ success: false, message: 'Default status TO DO not found' });
+        }
+
+        // Tìm no_task lớn nhất hiện tại trong sprint
+        const maxTask = await Task.findOne({
+            where: { id_sprint },
+            attributes: ['no_task'],
+            order: [[sequelize.fn('LENGTH', sequelize.col('no_task')), 'DESC'], ['no_task', 'DESC']],
+        });
+
+        let nextTaskNumber = 1; // Mặc định số thứ tự là 1
+        if (maxTask && maxTask.no_task) {
+            const noTaskParts = maxTask.no_task.split('-');
+            const taskNumber = noTaskParts.length > 1 ? parseInt(noTaskParts.pop(), 10) : NaN;
+            if (!isNaN(taskNumber)) {
+                nextTaskNumber = taskNumber + 1;
+            }
+        }
+
+        const no_task = `${projectKey}-${nextTaskNumber}`;
+
+        const maxTaskIndex = await Task.max('index', {
+            where: {
+                id_status,
+                id_sprint,
+            },
+        });
+
+        const newIndex = maxTaskIndex !== null ? maxTaskIndex + 1 : 0;
 
         // Tạo task mới
         const task = await Task.create({
@@ -44,10 +78,45 @@ exports.addTask = async (req, res) => {
             id_sprint,
             no_task,
             name,
+            priority,
+            expired_at,
             description,
+            index: newIndex,
         });
 
-        res.status(201).json({ success: true, data: task });
+        // Xử lý file upload
+        const files = req.files;
+        const uploadedFiles = [];
+
+        if (files && files.length > 0) {
+            for (const file of files) {
+                const tempFilePath = file.path;
+                const destination = `files/${task.id}/${file.filename}`;
+                const mimetype = file.mimetype;
+
+                // Upload file lên Firebase
+                const fileUrl = await uploadFileToFirebase(tempFilePath, destination, mimetype);
+
+                // Lưu thông tin file vào database
+                const newFile = await File.create({
+                    url: fileUrl,
+                    name: file.originalname,
+                    id_task: task.id,
+                    size: file.size,
+                    mimetype,
+                });
+
+                uploadedFiles.push(newFile);
+            }
+        }
+
+        res.status(201).json({
+            success: true,
+            data: {
+                task,
+                files: uploadedFiles,
+            },
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Failed to create task' });
@@ -72,6 +141,23 @@ exports.updateTask = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Task not found' });
         }
 
+        const id_sprint = task.id_sprint;
+
+        // Kiểm tra nếu `id_status` thay đổi
+        if (updateData.id_status && updateData.id_status !== task.id_status) {
+            // Lấy danh sách tasks trong trạng thái mới dựa trên `id_sprint` và `id_status`
+            const newStatusTasks = await Task.findAll({
+                where: { id_sprint, id_status: updateData.id_status },
+                order: [['index', 'DESC']],
+                limit: 1, // Chỉ cần task có `index` lớn nhất
+            });
+
+            // Gán `index` mới dựa trên trạng thái đích
+            const maxIndex = newStatusTasks.length > 0 ? newStatusTasks[0].index : -1;
+            updateData.index = maxIndex + 1;
+        }
+
+        // Cập nhật task
         await task.update(updateData);
 
         res.status(200).json({ success: true, data: task });
@@ -86,6 +172,7 @@ exports.deleteTasks = async (req, res) => {
     try {
         let { ids } = req.body;
 
+        // Kiểm tra và parse `ids` nếu là string
         if (typeof ids === 'string') {
             try {
                 ids = JSON.parse(ids);
@@ -94,18 +181,21 @@ exports.deleteTasks = async (req, res) => {
             }
         }
 
+        // Kiểm tra input hợp lệ
         if (!Array.isArray(ids) || ids.length === 0) {
             return res.status(400).json({ success: false, message: 'Invalid input, expected an array of ids' });
         }
 
-        const existingIds = await Task.findAll({
+        // Lấy thông tin các task tồn tại trong database
+        const existingTasks = await Task.findAll({
             where: { id: ids },
-            attributes: ['id'],
+            attributes: ['id', 'status', 'index'],
         });
 
-        const foundIds = existingIds.map((item) => item.id);
+        const foundIds = existingTasks.map((task) => task.id);
         const missingIds = ids.filter((id) => !foundIds.includes(id));
 
+        // Kiểm tra nếu có ID nào không tồn tại
         if (missingIds.length > 0) {
             return res.status(404).json({
                 message: 'Some IDs do not exist in the database',
@@ -113,6 +203,10 @@ exports.deleteTasks = async (req, res) => {
             });
         }
 
+        // Lấy danh sách status cần cập nhật
+        const statusesToUpdate = [...new Set(existingTasks.map((task) => task.status))];
+
+        // Xóa task
         const result = await Task.destroy({
             where: {
                 id: ids,
@@ -123,13 +217,79 @@ exports.deleteTasks = async (req, res) => {
             return res.status(404).json({ success: false, message: 'No tasks found to delete' });
         }
 
+        // Cập nhật lại index của các task còn lại và lấy danh sách cập nhật
+        const updatedTasksByStatus = {};
+        for (const status of statusesToUpdate) {
+            const tasksInStatus = await Task.findAll({
+                where: { status },
+                order: [['index', 'ASC']],
+            });
+
+            // Cập nhật lại index cho từng task
+            await Promise.all(
+                tasksInStatus.map((task, index) => task.update({ index }))
+            );
+
+            // Lưu danh sách tasks đã cập nhật vào kết quả trả về
+            updatedTasksByStatus[status] = tasksInStatus.map((task) => ({
+                id: task.id,
+                index: task.index,
+                status: task.status,
+            }));
+        }
+
         res.status(200).json({
             success: true,
-            message: `${result} task(s) deleted successfully`,
+            message: `${result} task(s) deleted and indexes updated successfully`,
+            updatedTasksByStatus, // Danh sách tasks đã cập nhật cho mỗi status
         });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Failed to delete task(s)' });
+    }
+};
+
+exports.deleteTask = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // Tìm task cần xóa
+        const taskToDelete = await Task.findByPk(id);
+
+        if (!taskToDelete) {
+            return res.status(404).json({ success: false, message: 'Task not found' });
+        }
+
+        const { id_status, id_sprint, index } = taskToDelete;
+
+        // Xóa task
+        await taskToDelete.destroy();
+
+        // Cập nhật lại index của các task còn lại trong cùng status và sprint
+        const tasksInStatus = await Task.findAll({
+            where: { id_status, id_sprint },
+            order: [['index', 'ASC']],
+        });
+
+        await Promise.all(
+            tasksInStatus.map((task, idx) => task.update({ index: idx }))
+        );
+
+        // Lấy danh sách các task đã được cập nhật
+        const updatedTasksByStatus = {
+            [id_status]: tasksInStatus.map((task) => (task)),
+        };
+
+        res.status(200).json({
+            success: true,
+            message: `Task with ID ${id} deleted successfully`,
+            id_sprint: id_sprint,
+            id_status: id_status,
+            updatedTasksByStatus,
+        });
+    } catch (error) {
+        console.error('Failed to delete task:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete task' });
     }
 };
 
@@ -160,14 +320,310 @@ exports.getTask = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const task = await Task.findByPk(id);
+        const task = await Task.findByPk(id, {
+            include: [
+                {
+                    model: File,
+                    as: 'files',
+                    attributes: ['id', 'name', 'url', 'mimetype', 'created_at'],
+                },
+                {
+                    model: Sprint,
+                    as: 'sprint', // Alias cho liên kết giữa Task và Sprint
+                    attributes: ['id', 'name'], // Chỉ lấy trường cần thiết từ Sprint
+                    include: [
+                        {
+                            model: Project,
+                            as: 'project', // Alias cho liên kết giữa Sprint và Project
+                            attributes: ['id', 'name'], // Chỉ lấy trường cần thiết từ Project
+                        },
+                    ],
+                },
+                {
+                    model: Comment,
+                    as: 'comments',
+                    attributes: ['id', 'text', 'created_at', 'updated_at'], // Các trường cần thiết
+                    include: [
+                        {
+                            model: User,
+                            as: 'user',
+                        },
+
+                    ],
+                    order: [['created_at', 'DESC']],
+                },
+            ],
+        });
+
         if (!task) {
             return res.status(404).json({ success: false, message: 'Task not found' });
         }
 
-        res.status(200).json({ success: true, data: task });
+        res.status(200).json({
+            success: true,
+            task,
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Failed to fetch task' });
     }
+};
+
+exports.getTasksGroupedByStatus = async (req, res) => {
+    try {
+        const sprintId = req.params.sprintId;
+
+        // Lấy danh sách tất cả các status
+        const statuses = await Status.findAll({
+            attributes: ['id', 'name'], // Lấy ID và tên của status
+            order: [['created_at', 'ASC']],
+        });
+
+        // Lấy danh sách các tasks của sprint hiện tại
+        const tasks = await Task.findAll({
+            where: { id_sprint: sprintId },
+            include: [
+                {
+                    model: Status,
+                    as: 'status',
+                    attributes: ['id', 'name'], // Lấy thông tin của status
+                },
+            ],
+        });
+
+        const groupedTasks = statuses.map((status) => {
+            const tasksForStatus = tasks
+                .filter((task) => task.id_status === status.id) // Lọc tasks có `id_status` trùng với `status.id`
+                .map((task) => ({
+                    id: task.id,
+                    name: task.name,
+                    description: task.description,
+                    priority: task.priority,
+                    expired_at: task.expired_at,
+                    id_sprint: sprintId,
+                    no_task: task.no_task,
+                    id_status: status.id,
+                    index: task.index,
+                    id_assignee: task.id_assignee,
+                    id_reporter: task.id_reporter,
+                    created_at: task.created_at,
+                    updated_at: task.updated_at,
+                }));
+
+            return {
+                id: status.id,
+                title: status.name,
+                tasks: tasksForStatus, // Danh sách các tasks hoặc mảng rỗng nếu không có tasks
+            };
+        });
+
+        res.status(200).json({
+            sprint_id: sprintId,
+            tasks_by_status: groupedTasks,
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Failed to fetch tasks grouped by status', error: error.message });
+    }
+};
+
+// Test
+async function getTasksBySprint(id_sprint) {
+    const tasks = await Task.findAll({
+        where: { id_sprint },
+        order: [['created_at', 'ASC']],
+    });
+
+    // Gom nhóm tasks theo trạng thái
+    const tasksByStatus = tasks.reduce((acc, task) => {
+        const status = acc.find(s => s.id === task.id_status);
+        if (!status) {
+            acc.push({
+                id: task.id_status,
+                tasks: [task],
+            });
+        } else {
+            status.tasks.push(task);
+        }
+        return acc;
+    }, []);
+
+    return tasksByStatus;
 }
+
+// exports.updateOrder = async (req, res) => {
+//     const { taskId, id_status, id_sprint, sourceIndex, destIndex, destinationStatus } = req.body;
+//
+//     try {
+//         // Lấy task cần cập nhật
+//         const task = await Task.findByPk(taskId);
+//         if (!task) {
+//             return res.status(404).json({ error: 'Task not found' });
+//         }
+//
+//         const lastStatusId = task.id_status;
+//
+//         // Lấy tất cả tasks trong mảng nguồn (nếu khác mảng đích)
+//         if (lastStatusId !== destinationStatus) {
+//             const tasksInSourceStatus = await Task.findAll({
+//                 where: { id_status: lastStatusId, id_sprint },
+//                 order: [['index', 'ASC']],
+//             });
+//
+//             // Loại bỏ task khỏi mảng nguồn
+//             const updatedSourceTasks = tasksInSourceStatus.filter(t => t.id !== taskId);
+//
+//             // Cập nhật lại `index` cho mảng nguồn
+//             await Promise.all(
+//                 updatedSourceTasks.map((t, index) => t.update({ index }))
+//             );
+//         }
+//
+//         // Cập nhật `id_status` của task nếu cần và lưu lại
+//         if (task.id_status !== destinationStatus) {
+//             task.id_status = destinationStatus;
+//             await task.save(); // Lưu thay đổi id_status
+//         }
+//
+//         // Lấy tất cả tasks trong mảng đích
+//         const tasksInDestinationStatus = await Task.findAll({
+//             where: { id_status: destinationStatus, id_sprint },
+//             order: [['index', 'ASC']],
+//         });
+//
+//         // Thêm task vào vị trí mới trong mảng đích
+//         const updatedDestinationTasks = [...tasksInDestinationStatus];
+//         updatedDestinationTasks.splice(destIndex, 0, task);
+//
+//         // Cập nhật lại `index` cho mảng đích
+//         await Promise.all(
+//             updatedDestinationTasks.map((t, index) => t.update({ index }))
+//         );
+//
+//         // Lưu lại task với thông tin mới nhất (bao gồm index)
+//         task.index = destIndex;
+//         await task.save();
+//
+//         res.json({
+//             sprint_id: id_sprint,
+//             task,
+//             lastStatusId,
+//             updated_task: {
+//                 id: task.id,
+//                 id_status: task.id_status,
+//                 index: task.index,
+//             }
+//         });
+//     } catch (error) {
+//         console.error('Failed to update task order:', error);
+//         res.status(500).json({ error: 'Failed to update task order' });
+//     }
+// };
+
+exports.updateOrder = async (req, res) => {
+    const { taskId, id_status, id_sprint, sourceIndex, destIndex, destinationStatus } = req.body;
+
+    try {
+        const task = await Task.findByPk(taskId);
+        if (!task) {
+            return res.status(404).json({ error: 'Task not found' });
+        }
+
+        const lastStatusId = task.id_status;
+
+        // Nếu kéo giữa hai status khác nhau
+        if (lastStatusId !== destinationStatus) {
+            // Xử lý các item trong status cũ
+            const tasksInSourceStatus = await Task.findAll({
+                where: { id_status: lastStatusId, id_sprint },
+                order: [['index', 'ASC']],
+            });
+
+            await Promise.all(
+                tasksInSourceStatus.map(async (t) => {
+                    if (t.index > sourceIndex) {
+                        await t.update({ index: t.index - 1 });
+                    }
+                })
+            );
+
+            // Xử lý các item trong status mới
+            const tasksInDestinationStatus = await Task.findAll({
+                where: { id_status: destinationStatus, id_sprint },
+                order: [['index', 'ASC']],
+            });
+
+            await Promise.all(
+                tasksInDestinationStatus.map(async (t) => {
+                    if (t.index >= destIndex) {
+                        await t.update({ index: t.index + 1 });
+                    }
+                })
+            );
+
+            // Cập nhật item được thả
+            task.id_status = destinationStatus;
+            task.index = destIndex;
+            await task.save();
+        } else {
+            // Kéo trong cùng một status
+            const tasksInSameStatus = await Task.findAll({
+                where: { id_status: lastStatusId, id_sprint },
+                order: [['index', 'ASC']],
+            });
+
+            if (sourceIndex < destIndex) {
+                // Kéo xuống
+                await Promise.all(
+                    tasksInSameStatus.map(async (t) => {
+                        if (t.index > sourceIndex && t.index <= destIndex) {
+                            await t.update({ index: t.index - 1 });
+                        }
+                    })
+                );
+            } else if (sourceIndex > destIndex) {
+                // Kéo lên
+                await Promise.all(
+                    tasksInSameStatus.map(async (t) => {
+                        if (t.index >= destIndex && t.index < sourceIndex) {
+                            await t.update({ index: t.index + 1 });
+                        }
+                    })
+                );
+            }
+
+            // Cập nhật item được kéo
+            task.index = destIndex;
+            await task.save();
+        }
+
+        // Lấy lại danh sách các tasks trong status cũ và mới
+        const finalSourceTasks = lastStatusId === destinationStatus ? [] : await Task.findAll({
+            where: { id_status: lastStatusId, id_sprint },
+            order: [['index', 'ASC']],
+        });
+
+        const finalDestinationTasks = await Task.findAll({
+            where: { id_status: destinationStatus, id_sprint },
+            order: [['index', 'ASC']],
+        });
+
+        res.json({
+            sprint_id: id_sprint,
+            task,
+            lastStatusId,
+            updated_task: {
+                id: task.id,
+                id_status: task.id_status,
+                index: task.index,
+            },
+            updatedTasksByStatus: {
+                [lastStatusId]: finalSourceTasks,
+                [destinationStatus]: finalDestinationTasks,
+            }
+        });
+    } catch (error) {
+        console.error('Failed to update task order:', error);
+        res.status(500).json({ error: 'Failed to update task order' });
+    }
+};

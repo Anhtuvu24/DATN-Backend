@@ -7,6 +7,7 @@ const Sprint = require('./Sprint');
 const Comment = require('./Comment')
 const Task = require('./Task')
 const Action = require('./Action')
+const File = require('./file')
 
 const defineAssociations = () => {
     // Quan hệ giữa Auth và User
@@ -23,12 +24,18 @@ const defineAssociations = () => {
 
     Project.hasMany(Sprint, {foreignKey: 'id_project', as: 'sprint', constraints: true});
 
-    User.hasMany(Comment, { foreignKey: 'id_user', as: 'comment' });
-    Task.hasMany(Comment, { foreignKey: 'id_task', as: 'comment' });
+    User.hasMany(Comment, { foreignKey: 'id_user', as: 'comments' });
+    Task.hasMany(Comment, { foreignKey: 'id_task', as: 'comments' });
 
     User.hasMany(Action, { foreignKey: 'id_user_action', as: 'actionsPerformed' });
     User.hasMany(Action, { foreignKey: 'id_user_receiver', as: 'actionsReceived' });
     Task.hasMany(Action, { foreignKey: 'id_task', as: 'taskActions' });
+
+    Task.belongsTo(Status, { foreignKey: 'id_status', as: 'status' });
+    Status.hasMany(Task, { foreignKey: 'id_status', as: 'tasks' });
+
+    Task.hasMany(File, { foreignKey: 'id_task', as: 'files' });
+    Sprint.hasMany(Task, { foreignKey: 'id_sprint', as: 'tasks' });
 };
 
 module.exports = defineAssociations;

@@ -24,7 +24,7 @@ const uploadFileToFirebase = async (tempFilePath, destination, mimetype) => {
         fs.unlinkSync(tempFilePath);
 
         // Trả về URL công khai của file
-        return `https://storage.googleapis.com/${bucket.name}/${destination}`;
+        return `${destination}`;
     } catch (error) {
         console.error('Error uploading file to Firebase:', error);
         throw new Error('Failed to upload file to Firebase');
