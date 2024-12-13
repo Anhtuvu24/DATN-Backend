@@ -49,6 +49,42 @@ exports.updateUser = async (req, res) => {
     }
 };
 
+exports.changePassword = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const { currentPassword, newPassword } = req.body;
+
+        // Tìm người dùng theo ID
+        const user = await User.findByPk(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Kiểm tra mật khẩu hiện tại
+        const isMatch = currentPassword === user.password;
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Current password is incorrect' });
+        }
+
+        // Mã hóa mật khẩu mới
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+        // Cập nhật mật khẩu mới
+        user.password = hashedNewPassword;
+        await user.save();
+
+        // Trả về thông tin người dùng đã cập nhật (không bao gồm mật khẩu)
+        const sanitizedUser = _.omit(user.toJSON(), ['password']);
+        res.status(200).json({
+            message: 'Password changed successfully',
+            user: sanitizedUser,
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
 exports.deleteUser = async (req, res) => {
     try {
         const userId = req.params.id;

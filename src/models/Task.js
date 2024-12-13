@@ -20,7 +20,7 @@ const Task = sequelize.define('Task', {
     },
     id_assignee: {
         type: DataTypes.UUID,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: 'user', // Tên bảng user
             key: 'id',

@@ -7,6 +7,7 @@ const User = require('../models/User')
 const Comment = require('../models/Comment')
 const { uploadFileToFirebase } = require('../services/firebaseUploader');
 const { sequelize } = require('../config/database');
+const {Op} = require("sequelize");
 
 // Tạo task
 exports.addTask = async (req, res) => {
@@ -366,6 +367,76 @@ exports.getTask = async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Failed to fetch task' });
+    }
+};
+
+// API Lấy danh sách Task với tìm kiếm, lọc, sắp xếp, và phân trang
+exports.searchTasks = async (req, res) => {
+    try {
+        const {
+            search = '',
+            filterKey = '',
+            filterValue = '',
+            order = 'ASC',
+            limit = 10,
+            page = 1,
+        } = req.query;
+
+        const offset = (page - 1) * limit;
+
+        // Điều kiện tìm kiếm
+        const whereCondition = {
+            [Op.and]: [
+                search ? {
+                    [Op.or]: [
+                        { no_task: { [Op.like]: `%${search}%` } },
+                        { name: { [Op.like]: `%${search}%` } },
+                    ],
+                } : {},
+                filterKey && filterValue ? {
+                    [filterKey]: Array.isArray(filterValue)
+                        ? { [Op.in]: filterValue } // Lọc theo nhiều giá trị
+                        : filterValue, // Lọc theo một giá trị
+                } : {},
+            ],
+        };
+
+        // Sắp xếp
+        const orderCondition = filterKey ? [[filterKey, order.toUpperCase()]] : [];
+
+        // Lấy danh sách tasks
+        const { count, rows } = await Task.findAndCountAll({
+            where: whereCondition,
+            order: orderCondition,
+            limit: parseInt(limit, 10),
+            offset: parseInt(offset, 10),
+            include: [
+                {
+                    model: Sprint,
+                    as: 'sprint',
+                    attributes: ['id', 'name'],
+                    include: [
+                        {
+                            model: Project,
+                            as: 'project',
+                            attributes: ['id', 'name'],
+                        },
+                    ],
+                },
+            ]
+        });
+
+        res.status(200).json({
+            data: rows,
+            pagination: {
+                total: count,
+                page: parseInt(page, 10),
+                limit: parseInt(limit, 10),
+            },
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Failed to search tasks' });
     }
 };
 

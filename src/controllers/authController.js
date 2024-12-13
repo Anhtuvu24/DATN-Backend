@@ -30,7 +30,7 @@ function generateRandomPassword() {
 }
 
 // Hàm gửi email với kiểu cách đẹp
-async function sendEmail(to, subject, userName, password) {
+async function sendEmail(to, subject, userName, userId, password) {
     const transporter = nodemailer.createTransport({
         service: 'gmail', // Hoặc sử dụng SMTP server khác
         auth: {
@@ -38,7 +38,7 @@ async function sendEmail(to, subject, userName, password) {
             pass: process.env.EMAIL_PASSWORD,
         },
     });
-
+    const href = `http://localhost:5173/change-password?userId=${userId}&password=${password}`;
     // Nội dung email HTML
     const emailHtml = `
         <div style="font-family: Arial, sans-serif; line-height: 1.5;">
@@ -46,9 +46,14 @@ async function sendEmail(to, subject, userName, password) {
             <p>Welcome to our platform! Your account has been successfully created.</p>
             <p>Below is your password. Please change it after logging in:</p>
             <div style="background: #f9f9f9; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
-                <p style="font-size: 18px; margin: 0;">Password: <strong id="password">${password}</strong></p>
-                <button style="margin-top: 10px; padding: 8px 12px; background: #007bff; color: #fff; border: none; border-radius: 3px; cursor: pointer;" 
-                    onclick="navigator.clipboard.writeText('${password}')">Copy Password</button>
+                <a href="${href}" 
+                    rel="noopener noreferrer"
+                    style="margin-top: 10px; padding: 8px 12px; background: #007bff; color: #fff; border: none; border-radius: 3px; cursor: pointer;text-decoration: unset"
+                    target="_blank"
+                    data-saferedirecturl=""
+                >
+                 CHANGE PASSWORD
+                </a>
             </div>
             <p>If you have any questions, feel free to contact our support team.</p>
             <p>Thank you,<br>The Team</p>
@@ -88,22 +93,45 @@ exports.register = async (req, res) => {
 
         // Gửi email
         const emailSubject = 'Welcome! Your Account Password';
-        await sendEmail(gmail, emailSubject, user_name, randomPassword);
+        await sendEmail(gmail, emailSubject, user_name, newUser.id, hashedPassword);
 
         // Trả về thông tin user (ẩn password)
         res.status(201).json({
             message: 'User created successfully and password sent to email.',
-            user: {
-                id: newUser.id,
-                user_name: newUser.user_name,
-                gmail: newUser.gmail,
-                gender: newUser.gender,
-                role: newUser.role,
-            },
+            user: newUser,
         });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to create user.' });
+    }
+};
+
+exports.forgotPassword = async (req, res) => {
+    try {
+        const { gmail } = req.body;
+
+        // Check if the email exists
+        const user = await User.findOne({ where: { gmail } });
+        if (!user) {
+            return res.status(404).json({ message: 'Email not found' });
+        }
+
+        // Generate a new random password and hash it
+        const newPassword = generateRandomPassword();
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update the user's password in the database
+        user.password = hashedPassword;
+        await user.save();
+
+        // Send the new password to the user's email
+        const emailSubject = 'Password Reset Request';
+        await sendEmail(gmail, emailSubject, user.user_name, user.id, hashedPassword);
+
+        res.status(200).json({ message: 'New password sent to your email' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Failed to reset password' });
     }
 };
 
@@ -215,6 +243,31 @@ exports.refreshToken = async (req, res) => {
             return res.status(403).json({ message: 'Refresh token has expired' });
         }
         return res.status(403).json({ message: 'Invalid or expired refresh token' });
+    }
+};
+
+exports.logout = async (req, res) => {
+    try {
+        // Lấy refresh token từ body hoặc header
+        const refreshToken = req.headers['x-refresh-token'];
+
+        if (!refreshToken) {
+            return res.status(400).json({ message: 'Refresh token is required' });
+        }
+
+        // Xóa refresh token khỏi database
+        const deleted = await AuthenToken.destroy({
+            where: { refresh_token: refreshToken },
+        });
+
+        if (!deleted) {
+            return res.status(404).json({ message: 'Refresh token not found' });
+        }
+
+        res.status(200).json({ message: 'Logout successful' });
+    } catch (error) {
+        console.error(error); // Log lỗi để debug
+        res.status(500).json({ message: 'System error' });
     }
 };
 

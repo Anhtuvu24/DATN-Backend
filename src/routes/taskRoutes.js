@@ -20,6 +20,8 @@ router.get('/list/:id_sprint', upload.none(), TaskController.getTasks);
 
 router.get('/tasks/:sprintId', upload.none(), TaskController.getTasksGroupedByStatus);
 
+router.get('/search-tasks', upload.none(), TaskController.searchTasks);
+
 // Lấy danh sách sprint
 router.get('/:id', upload.none(), TaskController.getTask);
 
