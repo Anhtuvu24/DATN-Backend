@@ -25,18 +25,14 @@ const Task = sequelize.define('Task', {
             model: 'user', // Tên bảng user
             key: 'id',
         },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE',
     },
     id_reporter: {
         type: DataTypes.UUID,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: 'user', // Tên bảng user
             key: 'id',
         },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE',
     },
     id_sprint: {
         type: DataTypes.UUID,

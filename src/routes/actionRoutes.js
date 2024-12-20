@@ -7,6 +7,7 @@ const {
     updateAction,
     deleteAction,
     getActionsByReceiver,
+    getActionsByTask
 } = require('../controllers/actionController');
 
 // Tạo mới action
@@ -20,5 +21,7 @@ router.delete('/delete', upload.none(), deleteAction);
 
 // Lấy danh sách action theo id_user_receiver
 router.get('/list/:id_user_receiver', upload.none(), getActionsByReceiver);
+
+router.get('/list-by-task/:id_task', upload.none(), getActionsByTask);
 
 module.exports = router;

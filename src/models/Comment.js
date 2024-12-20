@@ -1,4 +1,3 @@
-// models/Comment.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database'); // Kết nối database
 const User = require('./User');
@@ -12,12 +11,13 @@ const Comment = sequelize.define('Comment', {
     },
     id_user: {
         type: DataTypes.UUID,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: User,
             key: 'id',
         },
-        onDelete: 'CASCADE',
+        onDelete: 'SET NULL', // Khi xóa User, id_user sẽ được đặt NULL
+        onUpdate: 'CASCADE',
     },
     id_task: {
         type: DataTypes.UUID,
@@ -26,14 +26,21 @@ const Comment = sequelize.define('Comment', {
             model: Task,
             key: 'id',
         },
-        onDelete: 'CASCADE',
+        onDelete: 'CASCADE', // Khi xóa Task, Comment cũng sẽ bị xóa
+        onUpdate: 'CASCADE',
     },
     text: {
         type: DataTypes.TEXT,
         allowNull: false,
     },
-    created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
-    updated_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+    created_at: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+    },
+    updated_at: {
+        type: DataTypes.DATE,
+        defaultValue: DataTypes.NOW,
+    },
 }, {
     tableName: 'comment',
     timestamps: true,
@@ -41,7 +48,20 @@ const Comment = sequelize.define('Comment', {
     updatedAt: 'updated_at',
 });
 
-Comment.belongsTo(User, { foreignKey: 'id_user', as: 'user' });
-Comment.belongsTo(Task, { foreignKey: 'id_task', as: 'task' });
+// Thiết lập quan hệ với User
+Comment.belongsTo(User, {
+    foreignKey: 'id_user',
+    as: 'user',
+    onDelete: 'SET NULL',
+    onUpdate: 'CASCADE',
+});
+
+// Thiết lập quan hệ với Task
+Comment.belongsTo(Task, {
+    foreignKey: 'id_task',
+    as: 'task',
+    onDelete: 'CASCADE',
+    onUpdate: 'CASCADE',
+});
 
 module.exports = Comment;

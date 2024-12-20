@@ -1,4 +1,5 @@
 const ProjectType = require('../models/ProjectType');
+const Project = require('../models/Project');
 const { Op } = require('sequelize');
 
 // Thêm project_type
@@ -92,9 +93,14 @@ exports.deleteProjectTypes = async (req, res) => {
             });
         }
 
+        await Project.update(
+            { id_type: null },
+            { where: { id_type: ids } }
+        );
+
         await ProjectType.destroy({ where: { id: ids } });
 
-        res.status(200).json({ message: 'Project types deleted successfully' });
+        res.status(200).json({ message: 'Project types deleted successfully and related projects updated' });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'An error occurred', error: error.message });

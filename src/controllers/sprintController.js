@@ -1,7 +1,8 @@
-const Sprint = require('../models/Sprint');
 const { Op } = require('sequelize');
+const Sprint = require('../models/Sprint');
+const Task = require('../models/Task');
+const Status = require('../models/Status'); // Import model Status
 
-// Thêm sprint
 exports.addSprint = async (req, res) => {
     try {
         const { id_project, is_close, start_date, end_date } = req.body;
@@ -14,8 +15,9 @@ exports.addSprint = async (req, res) => {
 
         // Tự động sinh tên dựa trên số lớn nhất trong tên sprint
         let nextSprintNumber = 1; // Mặc định là 1 nếu chưa có Sprint
+        let lastSprint = null; // Sprint gần nhất (nếu tồn tại)
         if (existingSprints.length > 0) {
-            const lastSprint = existingSprints[0];
+            lastSprint = existingSprints[0];
             const match = lastSprint.name.match(/sprint (\d+)/i); // Tìm số cuối cùng trong tên
             if (match) {
                 nextSprintNumber = parseInt(match[1], 10) + 1; // Tăng số lên 1
@@ -33,12 +35,44 @@ exports.addSprint = async (req, res) => {
             end_date,
         });
 
-        res.status(201).json({ success: true, data: sprint });
+        let movedTasksCount = 0; // Đếm số lượng task được chuyển
+
+        // Nếu có Sprint trước đó, kiểm tra các task chưa hoàn thành
+        if (lastSprint) {
+            // Lấy `id` của status có `name` là 'none'
+            const doneStatus = await Status.findOne({ where: { name: 'DONE' } });
+            if (!doneStatus) {
+                return res.status(400).json({ success: false, message: "Status 'DONE' not exist." });
+            }
+
+            // Tìm các task chưa hoàn thành (trạng thái không phải 'none')
+            const tasksInLastSprint = await Task.findAll({
+                where: {
+                    id_sprint: lastSprint.id,
+                    id_status: { [Op.ne]: doneStatus.id },
+                },
+            });
+
+            // Chuyển các task chưa hoàn thành vào Sprint mới
+            for (const task of tasksInLastSprint) {
+                await task.update({ id_sprint: sprint.id });
+            }
+
+            movedTasksCount = tasksInLastSprint.length;
+        }
+
+        res.status(201).json({
+            success: true,
+            data: sprint,
+            message: lastSprint
+                ? `Sprint ${newSprintName} created. ${movedTasksCount} tasks moved from Sprint ${lastSprint.name}.`
+                : `Sprint ${newSprintName} created.`,
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ success: false, message: 'Failed to create sprint' });
     }
-}
+};
 
 // Sửa sprint
 // router.put('/sprints/:id', );

@@ -22,18 +22,18 @@ exports.createProject = async (req, res) => {
         }
 
         // Kiểm tra id_type có tồn tại trong bảng project_type không
-        const projectType = await ProjectType.findByPk(id_type, {
+        const projectType = id_type ? await ProjectType.findByPk(id_type, {
             attributes: ['id', 'name'], // Chỉ lấy trường name cần thiết
-        });
-        if (!projectType) {
+        }) : null;
+        if (id_type && !projectType) {
             return res.status(400).json({ message: 'Invalid id_type, not found in project_type table' });
         }
 
         // Kiểm tra id_lead có tồn tại trong bảng user không
-        const leadUser = await User.findByPk(id_lead, {
+        const leadUser = id_lead ? await User.findByPk(id_lead, {
             attributes: ['id', 'user_name', 'avatar'], // Chỉ lấy trường user_name cần thiết
-        });
-        if (!leadUser) {
+        }) : null;
+        if (id_lead && !leadUser) {
             return res.status(400).json({ message: 'Invalid id_lead, not found in user table' });
         }
 
@@ -64,9 +64,9 @@ exports.createProject = async (req, res) => {
                 key: newProject.key,
                 icon: newProject.icon,
                 is_favorite: newProject.is_favorite,
-                user_name: leadUser.user_name, // Trả về user_name của lead
-                user_avatar: leadUser.avatar, // Trả về user_name của lead
-                project_type_name: projectType.name, // Trả về name của projectType
+                user_name: id_lead ? leadUser.user_name : null, // Trả về user_name của lead
+                user_avatar: id_lead ? leadUser.avatar : null, // Trả về user_name của lead
+                project_type_name: id_type ? projectType.name : null, // Trả về name của projectType
             },
         });
     } catch (error) {
@@ -236,6 +236,7 @@ exports.getProjects = async (req, res) => {
                 key: projectData.key,
                 icon: projectData.icon,
                 is_favorite: projectData.is_favorite,
+                id_lead: projectData.id_lead,
                 user_name: projectData.lead?.user_name || null, // Lấy user_name của lead
                 user_avatar: projectData.lead?.avatar,
                 project_type_name: projectData.type?.name || null, // Lấy name của project type

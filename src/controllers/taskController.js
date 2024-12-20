@@ -5,9 +5,11 @@ const Status = require('../models/Status')
 const File = require('../models/file')
 const User = require('../models/User')
 const Comment = require('../models/Comment')
+const Action = require('../models/Action')
 const { uploadFileToFirebase } = require('../services/firebaseUploader');
 const { sequelize } = require('../config/database');
 const {Op} = require("sequelize");
+const jwt = require('jsonwebtoken');
 
 // Tạo task
 exports.addTask = async (req, res) => {
@@ -85,6 +87,21 @@ exports.addTask = async (req, res) => {
             index: newIndex,
         });
 
+        // Tạo Action liên quan đến Task vừa tạo
+        if (id_reporter && id_assignee) {
+            const reporter = await User.findByPk(id_reporter, { attributes: ['user_name'] });
+            const actionName = `${reporter.user_name} assigned task ${no_task} to you`;
+
+            await Action.create({
+                id_user_action: id_reporter,
+                id_user_receiver: id_assignee,
+                id_task: task.id,
+                name: actionName,
+                id_agent: task.id,
+                type_agent: 'task'
+            });
+        }
+
         // Xử lý file upload
         const files = req.files;
         const uploadedFiles = [];
@@ -130,6 +147,15 @@ exports.updateTask = async (req, res) => {
         const { id } = req.params;
         const updateData = { ...req.body };
 
+        // Lấy thông tin người thao tác từ token
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        const currentUser = await User.findByPk(verified.id, {
+            attributes: ['id', 'user_name', 'gmail', 'gender', 'avatar', 'role', 'is_active'],
+        });
+        const id_user_action = currentUser.id;
+
         if (updateData.no_task !== undefined) {
             return res.status(400).json({
                 success: false,
@@ -143,23 +169,57 @@ exports.updateTask = async (req, res) => {
         }
 
         const id_sprint = task.id_sprint;
+        let actionName;
 
         // Kiểm tra nếu `id_status` thay đổi
         if (updateData.id_status && updateData.id_status !== task.id_status) {
-            // Lấy danh sách tasks trong trạng thái mới dựa trên `id_sprint` và `id_status`
+            const oldStatus = await Status.findByPk(task.id_status, { attributes: ['name'] });
+            const newStatus = await Status.findByPk(updateData.id_status, { attributes: ['name'] });
+
             const newStatusTasks = await Task.findAll({
                 where: { id_sprint, id_status: updateData.id_status },
                 order: [['index', 'DESC']],
-                limit: 1, // Chỉ cần task có `index` lớn nhất
+                limit: 1,
             });
 
-            // Gán `index` mới dựa trên trạng thái đích
             const maxIndex = newStatusTasks.length > 0 ? newStatusTasks[0].index : -1;
             updateData.index = maxIndex + 1;
+
+            actionName = `${currentUser.user_name} changed task ${task.no_task} from status ${oldStatus.name} to ${newStatus.name}`;
+        } else {
+            actionName = `${currentUser.user_name} updated task ${task.no_task}`;
+        }
+
+        const isChangeAssignee = updateData.id_assignee !== task.id_assignee;
+
+        if (isChangeAssignee) {
+            actionName = `${currentUser.user_name} assigned task ${task.no_task} to you`
         }
 
         // Cập nhật task
         await task.update(updateData);
+
+        // if (id_user_action !== task.id_reporter) {
+        await Action.create({
+            id_user_action,
+            id_user_receiver: task.id_reporter,
+            id_task: task.id,
+            name: actionName,
+            id_agent: task.id,
+            type_agent: 'task'
+        });
+        // }
+
+        // if (id_user_action !== task.id_assignee) {
+        await Action.create({
+            id_user_action,
+            id_user_receiver: isChangeAssignee ? updateData.id_assignee : task.id_assignee,
+            id_task: task.id,
+            name: actionName,
+            id_agent: task.id,
+            type_agent: 'task'
+        });
+        // }
 
         res.status(200).json({ success: true, data: task });
     } catch (error) {
@@ -262,6 +322,10 @@ exports.deleteTask = async (req, res) => {
         }
 
         const { id_status, id_sprint, index } = taskToDelete;
+
+        await Action.destroy({
+            where: { id_agent: id },
+        });
 
         // Xóa task
         await taskToDelete.destroy();
@@ -595,16 +659,28 @@ exports.updateOrder = async (req, res) => {
     const { taskId, id_status, id_sprint, sourceIndex, destIndex, destinationStatus } = req.body;
 
     try {
+        // Lấy thông tin người thao tác từ token
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        const currentUser = await User.findByPk(verified.id, {
+            attributes: ['id', 'user_name', 'gmail', 'gender', 'avatar', 'role', 'is_active'],
+        });
+        const id_user_action = currentUser.id;
+
         const task = await Task.findByPk(taskId);
         if (!task) {
             return res.status(404).json({ error: 'Task not found' });
         }
 
         const lastStatusId = task.id_status;
+        let actionName;
 
-        // Nếu kéo giữa hai status khác nhau
         if (lastStatusId !== destinationStatus) {
-            // Xử lý các item trong status cũ
+            const oldStatus = await Status.findByPk(lastStatusId, { attributes: ['name'] });
+            const newStatus = await Status.findByPk(destinationStatus, { attributes: ['name'] });
+
+            // Xử lý các items trong status cũ và mới
             const tasksInSourceStatus = await Task.findAll({
                 where: { id_status: lastStatusId, id_sprint },
                 order: [['index', 'ASC']],
@@ -618,7 +694,6 @@ exports.updateOrder = async (req, res) => {
                 })
             );
 
-            // Xử lý các item trong status mới
             const tasksInDestinationStatus = await Task.findAll({
                 where: { id_status: destinationStatus, id_sprint },
                 order: [['index', 'ASC']],
@@ -632,19 +707,18 @@ exports.updateOrder = async (req, res) => {
                 })
             );
 
-            // Cập nhật item được thả
             task.id_status = destinationStatus;
             task.index = destIndex;
             await task.save();
+
+            actionName = `${currentUser.user_name} changed task ${task.no_task} from status ${oldStatus.name} to ${newStatus.name}`;
         } else {
-            // Kéo trong cùng một status
             const tasksInSameStatus = await Task.findAll({
                 where: { id_status: lastStatusId, id_sprint },
                 order: [['index', 'ASC']],
             });
 
             if (sourceIndex < destIndex) {
-                // Kéo xuống
                 await Promise.all(
                     tasksInSameStatus.map(async (t) => {
                         if (t.index > sourceIndex && t.index <= destIndex) {
@@ -653,7 +727,6 @@ exports.updateOrder = async (req, res) => {
                     })
                 );
             } else if (sourceIndex > destIndex) {
-                // Kéo lên
                 await Promise.all(
                     tasksInSameStatus.map(async (t) => {
                         if (t.index >= destIndex && t.index < sourceIndex) {
@@ -663,10 +736,33 @@ exports.updateOrder = async (req, res) => {
                 );
             }
 
-            // Cập nhật item được kéo
             task.index = destIndex;
             await task.save();
+
+            actionName = `${currentUser.user_name} updated task order for ${task.no_task}`;
         }
+
+        // if (id_user_action !== task.id_reporter) {
+        await Action.create({
+            id_user_action,
+            id_user_receiver: task.id_reporter,
+            id_task: task.id,
+            name: actionName,
+            id_agent: task.id,
+            type_agent: 'task'
+        });
+        // }
+
+        // if (id_user_action !== task.id_assignee) {
+        await Action.create({
+            id_user_action,
+            id_user_receiver: task.id_assignee,
+            id_task: task.id,
+            name: actionName,
+            id_agent: task.id,
+            type_agent: 'task'
+        });
+        // }
 
         // Lấy lại danh sách các tasks trong status cũ và mới
         const finalSourceTasks = lastStatusId === destinationStatus ? [] : await Task.findAll({

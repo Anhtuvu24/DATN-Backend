@@ -1,6 +1,10 @@
 const Action = require('../models/Action')
 const User = require('../models/User')
 const Task = require('../models/Task')
+const Comment = require('../models/Comment')
+const { Op } = require('sequelize');
+const Project = require("../models/Project");
+const Sprint = require("../models/Sprint");
 
 exports.createAction = async (req, res) => {
     const { id_user_action, id_user_receiver, id_task, name } = req.body;
@@ -92,10 +96,15 @@ exports.deleteAction = async (req, res) => {
 
 exports.getActionsByReceiver = async (req, res) => {
     const { id_user_receiver } = req.params;
+    const { page = 1, limit = 10 } = req.query; // Mặc định page = 1 và limit = 10
 
     try {
-        const actions = await Action.findAll({
-            where: { id_user_receiver },
+        // Phân trang
+        const offset = (page - 1) * limit;
+
+        // Lấy các actions với phân trang
+        const { rows: actions, count: totalActions } = await Action.findAndCountAll({
+            where: { id_user_receiver, id_user_action: { [Op.ne]: id_user_receiver }, },
             include: [
                 {
                     model: User,
@@ -105,13 +114,117 @@ exports.getActionsByReceiver = async (req, res) => {
                 {
                     model: Task,
                     as: 'task',
-                    attributes: ['id', 'name', 'no_task'],
+                    include: [
+                        {
+                            model: Sprint,
+                            as: 'sprint',
+                            attributes: ['id', 'name'],
+                            include: [
+                                {
+                                    model: Project,
+                                    as: 'project',
+                                    attributes: ['id', 'name'],
+                                },
+                            ],
+                        },
+                    ]
                 },
             ],
             order: [['created_at', 'DESC']],
+            limit: parseInt(limit, 10),
+            offset,
         });
 
-        return res.status(200).json({ success: true, data: actions });
+        // Lấy số lượng actions có is_read = false
+        const unreadCount = await Action.count({
+            where: {
+                id_user_receiver,
+                id_user_action: { [Op.ne]: id_user_receiver },
+                is_read: false
+            },
+        });
+
+        // Gắn thêm thông tin comment nếu type_agent là comment
+        const actionsWithDetails = await Promise.all(
+            actions.map(async (action) => {
+                if (action.type_agent === 'comment' && action.id_agent) {
+                    const comment = await Comment.findByPk(action.id_agent, {
+                        attributes: ['id', 'text', 'id_user', 'created_at'],
+                    });
+                    return { ...action.toJSON(), comment };
+                }
+                return action.toJSON();
+            })
+        );
+
+        // Trả về kết quả
+        return res.status(200).json({
+            success: true,
+            data: actionsWithDetails,
+            pagination: {
+                currentPage: parseInt(page, 10),
+                totalPages: Math.ceil(totalActions / limit),
+                totalActions,
+                unreadCount,
+            },
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ success: false, message: 'Failed to get list action' });
+    }
+};
+
+exports.getActionsByTask = async (req, res) => {
+    const { id_task } = req.params;
+    const { page = 1, limit = 10 } = req.query; // Mặc định page = 1 và limit = 10
+
+    try {
+        // Phân trang
+        const offset = (page - 1) * limit;
+
+        // Lấy các actions với phân trang
+        const { rows: actions, count: totalActions } = await Action.findAndCountAll({
+            where: { id_task },
+            include: [
+                {
+                    model: User,
+                    as: 'userAction',
+                    attributes: ['id', 'user_name', 'gmail', 'avatar'],
+                },
+                {
+                    model: User,
+                    as: 'userReceiver',
+                    attributes: ['id', 'user_name', 'gmail', 'avatar'],
+                },
+            ],
+            order: [['created_at', 'DESC']],
+            limit: parseInt(limit, 10),
+            offset,
+        });
+
+        // Gắn thêm thông tin comment nếu type_agent là comment
+        const actionsWithDetails = await Promise.all(
+            actions.map(async (action) => {
+                if (action.type_agent === 'comment' && action.id_agent) {
+                    const comment = await Comment.findByPk(action.id_agent, {
+                        attributes: ['id', 'text', 'id_user', 'created_at'],
+                    });
+                    return { ...action.toJSON(), comment };
+                }
+                return action.toJSON();
+            })
+        );
+
+        // Trả về kết quả
+        return res.status(200).json({
+            success: true,
+            data: actionsWithDetails,
+            pagination: {
+                currentPage: parseInt(page, 10),
+                totalPages: Math.ceil(totalActions / limit),
+                totalActions,
+            },
+        });
     } catch (error) {
         console.error(error);
         return res.status(500).json({ success: false, message: 'Failed to get list action' });

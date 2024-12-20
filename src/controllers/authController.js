@@ -1,4 +1,7 @@
 const User = require('../models/User');
+const Task = require('../models/Task');
+const Project = require('../models/Project');
+const Sprint = require('../models/Sprint');
 const AuthenToken = require('../models/AuthenToken');
 const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
@@ -286,38 +289,22 @@ exports.getMe = async (req, res) => {
             const currentTime = Date.now();
 
             if (expirationTime < currentTime) {
-                // Token hết hạn, sử dụng refresh token
+                // Token hết hạn, xử lý refresh token
                 const refreshToken = req.headers['x-refresh-token'];
                 if (!refreshToken) {
                     return res.status(401).json({ message: 'Refresh token required' });
                 }
                 try {
-                    // Gọi API refresh token
                     const response = await axios.post('http://localhost:3001/api/users/refresh-token', { refreshToken });
                     const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data;
 
-                    // Cập nhật access token và refresh token mới vào header
                     res.setHeader('Authorization', `Bearer ${newAccessToken}`);
                     res.setHeader('x-refresh-token', newRefreshToken);
 
                     // Xác thực lại với token mới
                     const verified = jwt.verify(newAccessToken, process.env.JWT_SECRET);
 
-                    // Lấy thông tin user
-                    const user = await User.findByPk(verified.id, {
-                        attributes: ['id', 'user_name', 'gmail', 'gender', 'avatar', 'role', 'is_active'],
-                    });
-
-                    if (!user) {
-                        return res.status(404).json({ message: 'User not found' });
-                    }
-
-                    return res.status(200).json({
-                        message: 'User retrieved successfully (refreshed token)',
-                        user,
-                        newAccessToken,
-                        newRefreshToken
-                    });
+                    return await fetchUserDetails(verified.id, res, true, newAccessToken, newRefreshToken);
                 } catch (error) {
                     console.error(error);
                     return res.status(403).json({ message: 'Invalid or expired refresh token' });
@@ -326,18 +313,7 @@ exports.getMe = async (req, res) => {
                 // Token còn hiệu lực
                 const verified = jwt.verify(token, process.env.JWT_SECRET);
 
-                const user = await User.findByPk(verified.id, {
-                    attributes: ['id', 'user_name', 'gmail', 'gender', 'avatar', 'role', 'is_active'],
-                });
-
-                if (!user) {
-                    return res.status(404).json({ message: 'User not found' });
-                }
-
-                return res.status(200).json({
-                    message: 'User retrieved successfully',
-                    user,
-                });
+                return await fetchUserDetails(verified.id, res);
             }
         } else {
             return res.status(400).json({ message: 'Invalid token structure' });
@@ -357,3 +333,62 @@ exports.getMe = async (req, res) => {
         return res.status(403).json({ message: 'Invalid or expired token', error: error.message });
     }
 };
+
+async function fetchUserDetails(userId, res, isRefreshed = false, newAccessToken = null, newRefreshToken = null) {
+    try {
+        const user = await User.findByPk(userId, {
+            attributes: ['id', 'user_name', 'gmail', 'gender', 'avatar', 'role', 'is_active'],
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Lấy danh sách task của user trong các sprint đang mở
+        const tasks = await Task.findAll({
+            where: { id_assignee: user.id },
+            include: [
+                {
+                    model: Sprint,
+                    as: 'sprint',
+                    where: { is_close: false },
+                    attributes: ['id', 'name', 'start_date', 'end_date', 'is_close', 'id_project'],
+                },
+            ],
+            attributes: ['id', 'name', 'description', 'id_status', 'priority'],
+        });
+
+        // Lấy danh sách project chứa các sprint và task đang làm
+        const projectIds = [...new Set(tasks.map(task => task.sprint.id_project))];
+        const projects = await Project.findAll({
+            where: { id: projectIds },
+            include: [
+                {
+                    model: Sprint,
+                    as: 'sprint',
+                    where: { is_close: false },
+                    include: [
+                        {
+                            model: Task,
+                            as: 'tasks',
+                            attributes: ['id', 'name', 'id_status', 'priority'],
+                        },
+                    ],
+                },
+            ],
+            attributes: ['id', 'name', 'icon'],
+        });
+
+        return res.status(200).json({
+            message: `User retrieved successfully${isRefreshed ? ' (refreshed token)' : ''}`,
+            user,
+            tasks,
+            projects,
+            ...(isRefreshed && { newAccessToken, newRefreshToken }),
+        });
+    } catch (error) {
+        console.error('Error fetching user details:', error);
+        return res.status(500).json({ message: 'Failed to fetch user details', error: error.message });
+    }
+}
+

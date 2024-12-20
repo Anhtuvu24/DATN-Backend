@@ -1,14 +1,19 @@
 const User = require('../models/User');
+const Task = require('../models/Task');
+const Action = require('../models/Action');
+const Project = require('../models/Project');
+const Comment = require('../models/Comment');
 const path = require("path");
 const fs = require("fs");
 const bcrypt = require('bcrypt');
 const _ = require('lodash');
 const { uploadFileToFirebase } = require('../services/firebaseUploader')
+const {admin} = require("../config/firebase");
 
 exports.updateUser = async (req, res) => {
     try {
         const userId = req.params.id;
-        const { user_name, gmail, gender, role, is_active, password } = req.body;
+        const { user_name, gmail, gender, role, is_active, password, current_password } = req.body;
         const avatar = req.file ? req.file.path : null;  // Lấy ảnh mới nếu có
 
         // Tìm người dùng theo ID
@@ -26,7 +31,9 @@ exports.updateUser = async (req, res) => {
         if (is_active !== undefined) updatedData.is_active = is_active;
         if (avatar) updatedData.avatar = avatar;
 
-        if (password) {
+        const hashCurrentPassword = current_password && await bcrypt.hash(hashCurrentPassword, 10);
+
+        if (password && hashCurrentPassword === user.password) {
             // Mã hóa mật khẩu
             const hashedPassword = await bcrypt.hash(password, 10);
             updatedData.password = hashedPassword;
@@ -95,6 +102,38 @@ exports.deleteUser = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
+        // Cập nhật id_lead trong bảng Project thành null nếu trùng với userId
+        await Project.update(
+            { id_lead: null },
+            { where: { id_lead: userId } }
+        );
+
+        // Cập nhật id_receiver và id_reporter trong bảng Action thành null nếu trùng với userId
+        await Action.update(
+            { id_receiver: null },
+            { where: { id_receiver: userId } }
+        );
+        await Action.update(
+            { id_reporter: null },
+            { where: { id_reporter: userId } }
+        );
+
+        // Cập nhật id_user trong bảng Comment thành null nếu trùng với userId
+        await Comment.update(
+            { id_user: null },
+            { where: { id_user: userId } }
+        );
+
+        // Cập nhật id_assignee và id_reporter trong bảng Task thành null nếu trùng với userId
+        await Task.update(
+            { id_assignee: null },
+            { where: { id_assignee: userId } }
+        );
+        await Task.update(
+            { id_reporter: null },
+            { where: { id_reporter: userId } }
+        );
+
         // Xóa người dùng
         await user.destroy();
 
@@ -129,6 +168,7 @@ exports.uploadAvatar = async (req, res) => {
         }
 
         // Cập nhật avatar trong database
+        await admin.storage().bucket().file(user.avatar).delete()
         user.avatar = fileUrl;
         await user.save();
 
@@ -140,6 +180,9 @@ exports.uploadAvatar = async (req, res) => {
                 user_name: user.user_name,
                 gmail: user.gmail,
                 avatar: user.avatar,  // Trả về đường dẫn ảnh
+                gender: user.gender,
+                role: user.role,
+                is_active: user.is_active
             },
         });
     } catch (error) {
