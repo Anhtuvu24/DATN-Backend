@@ -154,6 +154,10 @@ exports.login = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
+        if (!user.is_active) {
+            return res.status(401).json({ message: 'Account has been disabled' });
+        }
+
         // Kiểm tra mật khẩu
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {

@@ -107,6 +107,34 @@ exports.deleteProjectTypes = async (req, res) => {
     }
 };
 
+exports.deleteProjectType = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({ message: 'ID is required' });
+        }
+
+        const projectType = await ProjectType.findByPk(id);
+
+        if (!projectType) {
+            return res.status(404).json({ message: 'Project type not found' });
+        }
+
+        await Project.update(
+            { id_type: null },
+            { where: { id_type: id } }
+        );
+
+        await projectType.destroy();
+
+        res.status(200).json({ message: 'Project type deleted successfully and related projects updated' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'An error occurred', error: error.message });
+    }
+};
+
 // Lấy danh sách project_type
 exports.getProjectTypes = async (req, res) => {
     try {
@@ -135,7 +163,7 @@ exports.getProjectTypes = async (req, res) => {
         res.status(200).json({
             pagination: {
                 page,
-                perPage: limit,
+                limit,
                 totalItems,
                 totalPages,
             },

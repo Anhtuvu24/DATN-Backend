@@ -38,6 +38,9 @@ const Project = sequelize.define('Project', {
         type: DataTypes.STRING,
         unique: true
     },
+    description: {
+        type: DataTypes.STRING,
+    },
     icon: {
         type: DataTypes.STRING
     },

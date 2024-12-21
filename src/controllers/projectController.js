@@ -11,7 +11,7 @@ const { uploadFileToFirebase } = require('../services/firebaseUploader');
 // Thêm project
 exports.createProject = async (req, res) => {
     try {
-        const { id_type, id_lead, name, key, is_favorite } = req.body;
+        const { id_type, id_lead, name, key, is_favorite, description } = req.body;
         const file = req.file; // Lấy file từ form-data
         // Kiểm tra xem project với key đã tồn tại chưa
         const existingProject = await Project.findOne({ where: { key } });
@@ -53,6 +53,7 @@ exports.createProject = async (req, res) => {
             name,
             key,
             icon: projectIcon,
+            description,
             is_favorite: is_favorite || false,
         });
 
@@ -66,6 +67,8 @@ exports.createProject = async (req, res) => {
                 is_favorite: newProject.is_favorite,
                 user_name: id_lead ? leadUser.user_name : null, // Trả về user_name của lead
                 user_avatar: id_lead ? leadUser.avatar : null, // Trả về user_name của lead
+                id_type,
+                description: newProject.description || null,
                 project_type_name: id_type ? projectType.name : null, // Trả về name của projectType
             },
         });
@@ -80,7 +83,7 @@ exports.createProject = async (req, res) => {
 exports.updateProject = async (req, res) => {
     try {
         const projectId = req.params.id;
-        const { id_type, id_lead, name, key, is_favorite } = req.body;
+        const { id_type, id_lead, name, key, is_favorite, description } = req.body;
         const file = req.file;
 
         // Tìm project theo ID
@@ -103,12 +106,12 @@ exports.updateProject = async (req, res) => {
         // Kiểm tra id_lead
         let leadUser = null;
         if (id_lead) {
-            leadUser = await User.findByPk(id_lead, { attributes: ['id', 'user_name'] });
+            leadUser = await User.findByPk(id_lead, { attributes: ['id', 'user_name', 'avatar'] });
             if (!leadUser) {
                 return res.status(400).json({ message: 'Invalid id_lead, not found in user table' });
             }
         } else if (project.id_lead) {
-            leadUser = await User.findByPk(project.id_lead, { attributes: ['id', 'user_name'] });
+            leadUser = await User.findByPk(project.id_lead, { attributes: ['id', 'user_name', 'avatar'] });
         }
 
         // Cập nhật icon nếu có file mới
@@ -125,6 +128,7 @@ exports.updateProject = async (req, res) => {
             name: name || project.name,
             key: key || project.key,
             icon: updatedIcon,
+            description: description || project.description,
             is_favorite: is_favorite !== undefined ? is_favorite : project.is_favorite,
         });
 
@@ -138,6 +142,9 @@ exports.updateProject = async (req, res) => {
                 icon: project.icon,
                 is_favorite: project.is_favorite,
                 user_name: leadUser ? leadUser.user_name : null,
+                user_avatar: leadUser ? leadUser.avatar : null,
+                id_type: project.id_lead,
+                description: project.description || null,
                 project_type_name: projectType ? projectType.name : null,
             },
         });
@@ -239,6 +246,8 @@ exports.getProjects = async (req, res) => {
                 id_lead: projectData.id_lead,
                 user_name: projectData.lead?.user_name || null, // Lấy user_name của lead
                 user_avatar: projectData.lead?.avatar,
+                id_type: projectData?.id_type,
+                description: projectData.description || null,
                 project_type_name: projectData.type?.name || null, // Lấy name của project type
             };
         });
@@ -288,6 +297,8 @@ exports.getProjectById = async (req, res) => {
                 icon: project.icon,
                 is_favorite: project.is_favorite,
                 user_name: project.lead?.user_name || null,
+                id_type: project?.id_type,
+                description: project.description || null,
                 project_type_name: project.type?.name || null,
                 active_sprints: activeSprints,
             },

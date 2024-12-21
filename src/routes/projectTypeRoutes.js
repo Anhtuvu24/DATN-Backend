@@ -12,6 +12,8 @@ router.put('/update', upload.none(), projectTypeController.updateProjectType);
 // Xóa 1 hoặc nhiều project_type
 router.delete('/delete', upload.none(), projectTypeController.deleteProjectTypes);
 
+router.delete('/delete/:id', upload.none(), projectTypeController.deleteProjectType);
+
 // Lấy danh sách project_type
 router.get('/list', upload.none(), projectTypeController.getProjectTypes);
 

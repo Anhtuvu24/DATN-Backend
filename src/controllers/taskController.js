@@ -36,6 +36,15 @@ exports.addTask = async (req, res) => {
         }
 
         const projectKey = sprint.project.key;
+        const id_project = sprint.project.id;
+
+        // Lấy tất cả các sprint thuộc cùng một project
+        const sprints = await Sprint.findAll({
+            where: { id_project },
+            attributes: ['id'],
+        });
+
+        const sprintIds = sprints.map(s => s.id);
 
         // Lấy ID của status có name là 'TO DO'
         const status = await Status.findOne({
@@ -48,7 +57,7 @@ exports.addTask = async (req, res) => {
 
         // Tìm no_task lớn nhất hiện tại trong sprint
         const maxTask = await Task.findOne({
-            where: { id_sprint },
+            where: { id_sprint: sprintIds },
             attributes: ['no_task'],
             order: [[sequelize.fn('LENGTH', sequelize.col('no_task')), 'DESC'], ['no_task', 'DESC']],
         });
@@ -76,7 +85,7 @@ exports.addTask = async (req, res) => {
         // Tạo task mới
         const task = await Task.create({
             id_status,
-            id_assignee,
+            id_assignee: id_assignee || null,
             id_reporter,
             id_sprint,
             no_task,
@@ -87,6 +96,7 @@ exports.addTask = async (req, res) => {
             index: newIndex,
         });
 
+        console.log(id_assignee)
         // Tạo Action liên quan đến Task vừa tạo
         if (id_reporter && id_assignee) {
             const reporter = await User.findByPk(id_reporter, { attributes: ['user_name'] });

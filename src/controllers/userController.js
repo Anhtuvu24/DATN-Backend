@@ -31,12 +31,16 @@ exports.updateUser = async (req, res) => {
         if (is_active !== undefined) updatedData.is_active = is_active;
         if (avatar) updatedData.avatar = avatar;
 
-        const hashCurrentPassword = current_password && await bcrypt.hash(hashCurrentPassword, 10);
-
-        if (password && hashCurrentPassword === user.password) {
+        const hashCurrentPassword = current_password && await bcrypt.hash(current_password, 10);
+        const isPasswordValid = await bcrypt.compare(current_password, user.password);
+        if (password && isPasswordValid) {
             // Mã hóa mật khẩu
             const hashedPassword = await bcrypt.hash(password, 10);
             updatedData.password = hashedPassword;
+        } else if (password && !isPasswordValid) {
+            return res.status(401).json({
+                message: 'Password is incorrect',
+            });
         }
 
         // Cập nhật thông tin người dùng

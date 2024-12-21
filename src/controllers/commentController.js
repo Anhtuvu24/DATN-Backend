@@ -56,9 +56,7 @@ exports.addComment = async (req, res) => {
                 type_agent: 'comment',
                 id_agent: newComment.id
             });
-        }
-
-        if (id_user !== task.id_assignee) {
+        } else if (id_user !== task.id_assignee) {
             // Tạo hành động cho `id_user_receiver` là `id_assignee`
             await Action.create({
                 id_user_action: id_user,
