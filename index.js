@@ -24,7 +24,7 @@ app.use(bodyParser.json());
 app.use(timezoneMiddleware);
 
 app.use(cors({
-    origin: 'http://localhost:5173', // Địa chỉ của ứng dụng React
+    origin: ['http://localhost:5173', 'https://c441-14-162-4-3.ngrok-free.app'], // Địa chỉ của ứng dụng React
     methods: 'GET,POST,PUT,DELETE',
     credentials: true
 }));

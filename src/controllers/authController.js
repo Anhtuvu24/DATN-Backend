@@ -165,7 +165,7 @@ exports.login = async (req, res) => {
         }
 
         // Tạo access token và refresh token
-        const accessToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1m' });
+        const accessToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         const refreshToken = jwt.sign({ id: user.id }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
 
         // Lưu refresh token vào database
@@ -229,7 +229,7 @@ exports.refreshToken = async (req, res) => {
         }
 
         // Tạo mới access token và refresh token
-        const newAccessToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '15m' });
+        const newAccessToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
         const newRefreshToken = jwt.sign({ id: user.id }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
 
         // Cập nhật refresh token mới trong cơ sở dữ liệu
