@@ -32,7 +32,7 @@ exports.updateUser = async (req, res) => {
         if (avatar) updatedData.avatar = avatar;
 
         const hashCurrentPassword = current_password && await bcrypt.hash(current_password, 10);
-        const isPasswordValid = await bcrypt.compare(current_password, user.password);
+        const isPasswordValid = current_password && await bcrypt.compare(current_password, user.password);
         if (password && isPasswordValid) {
             // Mã hóa mật khẩu
             const hashedPassword = await bcrypt.hash(password, 10);
@@ -172,7 +172,10 @@ exports.uploadAvatar = async (req, res) => {
         }
 
         // Cập nhật avatar trong database
-        await admin.storage().bucket().file(user.avatar).delete()
+        if (user.avatar) {
+            await admin.storage().bucket().file(user.avatar).delete()
+        }
+
         user.avatar = fileUrl;
         await user.save();
 
